@@ -1,0 +1,159 @@
+# Local provisioners for score-compose (P1-I2).
+#
+# score-compose has no default provisioner for the `smtp` resource type.
+# Its default `postgres` and `s3` provisioners use random service names and passwords.
+# They also do not publish the MinIO S3 API port to the host.
+# The provisioners below replace them for this repository.
+# They give fixed service names, fixed local-only credentials and fixed host ports.
+# Thus `pnpm dev` on the host works with the values in `.env.example`.
+#
+# Each type supports one resource only. A second `postgres`, `s3` or `smtp` resource gets the same service.
+# If a workload needs two of one type, change these provisioners first.
+#
+# These credentials are for local development and CI only. Never use them in a deployed environment.
+# `score-compose init --provisioners score-compose.provisioners.yaml` copies this file into `.score-compose/`.
+# After you change this file, run init and generate again (see docs/local-dev.md).
+
+# resources.db -> one Postgres 17 database. Host port 5432.
+- uri: template://community/postgres
+  type: postgres
+  description: One local PostgreSQL 17 database with fixed local credentials, published on host port 5432.
+  outputs: |
+    host: postgres
+    port: 5432
+    name: community
+    database: community
+    username: community
+    password: community
+  volumes: |
+    postgres-data:
+      driver: local
+  services: |
+    postgres:
+      image: postgres:17-alpine
+      restart: unless-stopped
+      environment:
+        POSTGRES_USER: community
+        POSTGRES_PASSWORD: community
+        POSTGRES_DB: community
+      ports:
+        - target: 5432
+          published: "5432"
+      volumes:
+        - type: volume
+          source: postgres-data
+          target: /var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD", "pg_isready", "-U", "community", "-d", "community"]
+        interval: 2s
+        timeout: 2s
+        retries: 15
+  info_logs: |
+    - "{{ .Uid }}: Postgres is at postgres://community:community@localhost:5432/community"
+  expected_outputs:
+    - host
+    - port
+    - name
+    - database
+    - username
+    - password
+
+# resources.storage -> one MinIO bucket. S3 API on host port 9000, console on host port 9001.
+# The official MinIO images (quay.io/minio/minio, minio/minio) are no longer public. We use the pgsty
+# community fork of MinIO (https://github.com/pgsty/minio). It has the same server and the same `mc` CLI.
+- uri: template://community/s3
+  type: s3
+  description: One local MinIO bucket with fixed local credentials, S3 API on host port 9000.
+  outputs: |
+    bucket: community
+    endpoint: http://minio:9000
+    public_endpoint: http://localhost:9000
+    public_base_url: http://localhost:9000/community
+    region: us-east-1
+    access_key_id: community
+    secret_key: community-local
+    aws_access_key_id: community
+    aws_secret_key: community-local
+  volumes: |
+    minio-data:
+      driver: local
+  services: |
+    minio:
+      image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+      command: ["server", "/data", "--console-address", ":9001"]
+      restart: unless-stopped
+      environment:
+        MINIO_ROOT_USER: community
+        MINIO_ROOT_PASSWORD: community-local
+        MINIO_API_CORS_ALLOW_ORIGIN: "http://localhost:*,http://127.0.0.1:*,http://*.localhost,http://*.localhost:*,http://*.example,http://*.example:*"
+      ports:
+        - target: 9000
+          published: "9000"
+        - target: 9001
+          published: "9001"
+      volumes:
+        - type: volume
+          source: minio-data
+          target: /data
+      healthcheck:
+        test: ["CMD-SHELL", "mc alias set local http://localhost:9000 community community-local"]
+        interval: 2s
+        timeout: 2s
+        retries: 15
+    minio-init:
+      image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+      entrypoint: ["/bin/sh", "-c"]
+      command:
+        - "mc alias set local http://minio:9000 community community-local && mc mb -p local/community && printf '%s' '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"*\"]},\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::community/public/*\"]}]}' > /tmp/public-read.json && mc anonymous set-json /tmp/public-read.json local/community"
+      labels:
+        dev.score.compose.labels.is-init-container: "true"
+      depends_on:
+        minio:
+          condition: service_healthy
+          restart: true
+  info_logs: |
+    - "{{ .Uid }}: MinIO S3 API is at http://localhost:9000 (bucket community). Console: http://localhost:9001 (community / community-local)"
+  expected_outputs:
+    - bucket
+    - endpoint
+    - public_endpoint
+    - public_base_url
+    - region
+    - access_key_id
+    - secret_key
+
+# resources.mail -> Mailpit. SMTP on host port 1025, web inbox and API on host port 8025.
+- uri: template://community/smtp
+  type: smtp
+  description: Local Mailpit SMTP server and web inbox. SMTP on host port 1025, inbox on host port 8025.
+  outputs: |
+    host: mailpit
+    port: 1025
+    username: community
+    password: community
+    from: Community <no-reply@community.localhost>
+  services: |
+    mailpit:
+      image: axllent/mailpit:v1.27
+      restart: unless-stopped
+      environment:
+        MP_SMTP_AUTH_ACCEPT_ANY: "1"
+        MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      ports:
+        - target: 1025
+          published: "1025"
+        - target: 8025
+          published: "8025"
+      healthcheck:
+        test: ["CMD", "/mailpit", "readyz"]
+        interval: 2s
+        timeout: 2s
+        retries: 15
+  info_logs: |
+    - "{{ .Uid }}: Mailpit inbox is at http://localhost:8025"
+  expected_outputs:
+    - host
+    - port
+    - username
+    - password
+    - from

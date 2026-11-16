@@ -1,0 +1,55 @@
+# The one workload spec for every platform (ADR-0002).
+# score-compose (local + CI) generates compose.yaml from this file. score-cloudrun (Phase 10) and score-k8s
+# (Milestone E) use the same file. See docs/local-dev.md for the commands.
+#
+# The app gets DATABASE_URL, S3_*, SMTP_* and BETTER_AUTH_SECRET only from the resources below. Do not add them as literals.
+apiVersion: score.dev/v1b1
+
+metadata:
+  name: web
+
+containers:
+  app:
+    # "." means "build this repository". score-compose builds it from ./Dockerfile (P1-I4).
+    image: .
+    variables:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://${resources.db.username}:${resources.db.password}@${resources.db.host}:${resources.db.port}/${resources.db.database}
+      S3_ENDPOINT: ${resources.storage.endpoint}
+      S3_PUBLIC_ENDPOINT: ${resources.storage.public_endpoint}
+      S3_PUBLIC_BASE_URL: ${resources.storage.public_base_url}
+      S3_REGION: ${resources.storage.region}
+      S3_BUCKET: ${resources.storage.bucket}
+      S3_ACCESS_KEY_ID: ${resources.storage.access_key_id}
+      S3_SECRET_ACCESS_KEY: ${resources.storage.secret_key}
+      SMTP_HOST: ${resources.mail.host}
+      SMTP_PORT: ${resources.mail.port}
+      SMTP_USER: ${resources.mail.username}
+      SMTP_PASSWORD: ${resources.mail.password}
+      # The From header of every email (src/lib/server/platform/email/).
+      EMAIL_FROM: ${resources.mail.from}
+      # Background job execution mode (`worker` locally, `webhook` on Cloud Run).
+      QUEUE_MODE: ${resources.env.QUEUE_MODE}
+      # Signs `/api/cron/run-due-jobs` webhook ticks. Never commit a value.
+      CRON_SECRET: ${resources.env.CRON_SECRET}
+      # Signs the session cookie (src/lib/server/platform/auth/). A secret: it comes from the environment, never from git.
+      BETTER_AUTH_SECRET: ${resources.env.BETTER_AUTH_SECRET}
+
+service:
+  ports:
+    web:
+      port: 3000
+      targetPort: 3000
+
+resources:
+  # Values from the environment of the deploy. score-compose writes them as ${NAME} into compose.yaml,
+  # and `docker compose` reads them from the shell or from .env.
+  env:
+    type: environment
+  db:
+    type: postgres
+  storage:
+    type: s3
+  mail:
+    type: smtp

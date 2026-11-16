@@ -1,0 +1,66 @@
+- uri: template://community/gcp-lookup-environment
+  type: environment
+  class: default
+  format: terraform
+  description: Looks up existing Secret Manager secrets for application runtime in split-state production.
+  outputs:
+    BETTER_AUTH_SECRET: "gcpsm:community-better-auth-secret"
+    CRON_SECRET: "gcpsm:community-cron-secret"
+    QUEUE_MODE: "webhook"
+
+- uri: template://community/gcp-lookup-postgres
+  type: postgres
+  class: default
+  format: terraform
+  description: Looks up an existing Cloud SQL Private IP instance managed by foundation Terraform.
+  outputs:
+    host: "${data.google_sql_database_instance.postgres.private_ip_address}"
+    port: "5432"
+    database: "community"
+    username: "community"
+    password: "${data.google_secret_manager_secret_version.db_password.secret_data}"
+  manifests: |
+    data "google_sql_database_instance" "postgres" {
+      project = "{{ .ProjectId }}"
+      name    = var.cloudsql_instance_name
+    }
+
+    data "google_secret_manager_secret_version" "db_password" {
+      project = "{{ .ProjectId }}"
+      secret  = "community-db-password"
+    }
+
+- uri: template://community/gcp-lookup-s3
+  type: s3
+  class: default
+  format: terraform
+  description: Looks up an existing GCS bucket and HMAC key managed by foundation Terraform.
+  outputs:
+    bucket: "${data.google_storage_bucket.assets.name}"
+    endpoint: "https://storage.googleapis.com"
+    public_endpoint: "https://storage.googleapis.com"
+    public_base_url: "${var.s3_public_base_url != "" ? var.s3_public_base_url : "https://storage.googleapis.com/${data.google_storage_bucket.assets.name}"}"
+    region: "${var.region}"
+    access_key_id: "${data.google_secret_manager_secret_version.s3_access_key_id.secret_data}"
+    secret_key: "gcpsm:community-s3-secret-key"
+  manifests: |
+    data "google_storage_bucket" "assets" {
+      name = "{{ .ProjectId }}-community-assets"
+    }
+
+    data "google_secret_manager_secret_version" "s3_access_key_id" {
+      project = "{{ .ProjectId }}"
+      secret  = "community-s3-access-key-id"
+    }
+
+- uri: template://community/gcp-lookup-smtp
+  type: smtp
+  class: default
+  format: terraform
+  description: Binds Resend SMTP credentials from an existing Secret Manager secret.
+  outputs:
+    host: "smtp.resend.com"
+    port: "465"
+    username: "resend"
+    password: "gcpsm:community-smtp-password"
+    from: "Cloud Native Canada <no-reply@${var.org_domain}>"

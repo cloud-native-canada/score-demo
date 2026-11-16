@@ -1,0 +1,136 @@
+- id: community-default-terraform
+  name: default
+  format: terraform
+  description: Cloud Run v2 Service with Direct VPC Egress, scale-to-zero, Secret Manager refs, and public invoker IAM.
+  manifests: |
+    {{- $workloadName := .WorkloadName }}
+    resource "google_service_account" "{{ $workloadName }}" {
+      project    = "{{ .ProjectId }}"
+      account_id = "community-{{ $workloadName }}"
+    }
+
+    resource "google_cloud_run_v2_service" "{{ $workloadName }}" {
+      project             = "{{ .ProjectId }}"
+      location            = "{{ .Location }}"
+      name                = "{{ $workloadName }}"
+      deletion_protection = false
+      ingress             = "INGRESS_TRAFFIC_ALL"
+
+      template {
+        service_account = google_service_account.{{ $workloadName }}.email
+
+        scaling {
+          min_instance_count = 0
+          max_instance_count = 10
+        }
+
+        vpc_access {
+          network_interfaces {
+            network    = google_compute_network.vpc.name
+            subnetwork = google_compute_subnetwork.subnet.name
+          }
+          egress = "PRIVATE_RANGES_ONLY"
+        }
+
+        {{- range $containerName, $container := .Spec.Containers }}
+        containers {
+          name  = "{{ hclescape $containerName }}"
+          image = "{{ hclescape $container.Image }}"
+
+          {{- $hasPort := false }}
+          {{- if $.Spec.Service }}
+          {{- range $portName, $port := $.Spec.Service.Ports }}
+          {{- if not $hasPort }}
+          ports {
+            container_port = {{ if $port.TargetPort }}{{ $port.TargetPort }}{{ else }}{{ $port.Port }}{{ end }}
+          }
+          {{- $hasPort = true }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- if not $hasPort }}
+          ports {
+            container_port = 3000
+          }
+          {{- end }}
+
+          resources {
+            cpu_idle = true
+            limits = {
+              cpu    = "1"
+              memory = "512Mi"
+            }
+          }
+
+          {{- range $variableName, $variableValue := $container.Variables }}
+          {{- if ne $variableName "PORT" }}
+          {{- if and (ge (len $variableValue) 6) (eq (slice $variableValue 0 6) "gcpsm:") }}
+          env {
+            name = "{{ hclescape $variableName }}"
+            value_source {
+              secret_key_ref {
+                secret  = "{{ hclescape (slice $variableValue 6) }}"
+                version = "latest"
+              }
+            }
+          }
+          {{- else if eq $variableName "DATABASE_URL" }}
+          env {
+            name = "{{ hclescape $variableName }}"
+            value_source {
+              secret_key_ref {
+                secret  = google_secret_manager_secret_iam_member.{{ $workloadName }}_database_url.secret_id
+                version = "latest"
+              }
+            }
+          }
+          {{- else }}
+          env {
+            name  = "{{ hclescape $variableName }}"
+            value = "{{ hclescape $variableValue }}"
+          }
+          {{- end }}
+          {{- end }}
+          {{- end }}
+        }
+        {{- end }}
+      }
+
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_cloud_run_v2_service_iam_member" "{{ $workloadName }}_public_invoker" {
+      project  = "{{ .ProjectId }}"
+      location = "{{ .Location }}"
+      name     = google_cloud_run_v2_service.{{ $workloadName }}.name
+      role     = "roles/run.invoker"
+      member   = "allUsers"
+    }
+
+    {{- range $containerName, $container := .Spec.Containers }}
+    {{- range $variableName, $variableValue := $container.Variables }}
+    {{- if and (eq $variableName "DATABASE_URL") (or (lt (len $variableValue) 6) (ne (slice $variableValue 0 6) "gcpsm:")) }}
+    resource "google_secret_manager_secret" "{{ $workloadName }}_database_url" {
+      project   = "{{ $.ProjectId }}"
+      secret_id = "community-{{ $workloadName }}-database-url"
+      replication {
+        auto {}
+      }
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_secret_manager_secret_version" "{{ $workloadName }}_database_url" {
+      secret      = google_secret_manager_secret.{{ $workloadName }}_database_url.id
+      secret_data = "{{ hclescape $variableValue }}"
+    }
+
+    resource "google_secret_manager_secret_iam_member" "{{ $workloadName }}_database_url" {
+      project    = "{{ $.ProjectId }}"
+      secret_id  = google_secret_manager_secret.{{ $workloadName }}_database_url.secret_id
+      role       = "roles/secretmanager.secretAccessor"
+      member     = "serviceAccount:${google_service_account.{{ $workloadName }}.email}"
+      depends_on = [google_secret_manager_secret_version.{{ $workloadName }}_database_url]
+    }
+    {{- end }}
+    {{- end }}
+    {{- end }}

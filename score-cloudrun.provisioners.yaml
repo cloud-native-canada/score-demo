@@ -1,0 +1,232 @@
+- uri: template://community/gcp-environment
+  type: environment
+  class: default
+  format: terraform
+  description: Binds application secrets and queue mode from Secret Manager and Terraform variables.
+  outputs:
+    BETTER_AUTH_SECRET: "gcpsm:${google_secret_manager_secret_iam_member.better_auth_secret.secret_id}"
+    CRON_SECRET: "gcpsm:${google_secret_manager_secret_iam_member.cron_secret.secret_id}"
+    QUEUE_MODE: "webhook"
+  manifests: |
+    resource "random_password" "better_auth_secret" {
+      length  = 48
+      special = false
+    }
+
+    resource "google_secret_manager_secret" "better_auth_secret" {
+      project   = "{{ .ProjectId }}"
+      secret_id = "community-better-auth-secret"
+      replication {
+        auto {}
+      }
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_secret_manager_secret_version" "better_auth_secret" {
+      secret      = google_secret_manager_secret.better_auth_secret.id
+      secret_data = var.better_auth_secret != "" ? var.better_auth_secret : random_password.better_auth_secret.result
+    }
+
+    resource "google_secret_manager_secret_iam_member" "better_auth_secret" {
+      project    = "{{ .ProjectId }}"
+      secret_id  = google_secret_manager_secret.better_auth_secret.secret_id
+      role       = "roles/secretmanager.secretAccessor"
+      member     = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
+      depends_on = [google_secret_manager_secret_version.better_auth_secret]
+    }
+
+    resource "random_password" "cron_secret" {
+      length  = 48
+      special = false
+    }
+
+    resource "google_secret_manager_secret" "cron_secret" {
+      project   = "{{ .ProjectId }}"
+      secret_id = "community-cron-secret"
+      replication {
+        auto {}
+      }
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_secret_manager_secret_version" "cron_secret" {
+      secret      = google_secret_manager_secret.cron_secret.id
+      secret_data = var.cron_secret != "" ? var.cron_secret : random_password.cron_secret.result
+    }
+
+    resource "google_secret_manager_secret_iam_member" "cron_secret" {
+      project    = "{{ .ProjectId }}"
+      secret_id  = google_secret_manager_secret.cron_secret.secret_id
+      role       = "roles/secretmanager.secretAccessor"
+      member     = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
+      depends_on = [google_secret_manager_secret_version.cron_secret]
+    }
+
+- uri: template://community/gcp-postgres
+  type: postgres
+  class: default
+  format: terraform
+  description: Cloud SQL for PostgreSQL 17 with Private IP over Direct VPC Egress.
+  outputs:
+    host: "${google_sql_database_instance.postgres.private_ip_address}"
+    port: "5432"
+    database: "${google_sql_database.app.name}"
+    username: "${google_sql_user.app.name}"
+    password: "${random_password.db_password.result}"
+  manifests: |
+    resource "random_id" "db_suffix" {
+      byte_length = 4
+    }
+
+    resource "random_password" "db_password" {
+      length  = 24
+      special = false
+    }
+
+    resource "google_sql_database_instance" "postgres" {
+      project             = "{{ .ProjectId }}"
+      name                = "community-pg-${random_id.db_suffix.hex}"
+      region              = "{{ .Location }}"
+      database_version    = "POSTGRES_17"
+      deletion_protection = false
+
+      settings {
+        tier = "db-f1-micro"
+        ip_configuration {
+          ipv4_enabled                                  = false
+          private_network                               = google_compute_network.vpc.id
+          enable_private_path_for_google_cloud_services = true
+        }
+      }
+
+      depends_on = [google_service_networking_connection.private_vpc_connection]
+    }
+
+    resource "google_sql_database" "app" {
+      project  = "{{ .ProjectId }}"
+      name     = "community"
+      instance = google_sql_database_instance.postgres.name
+    }
+
+    resource "google_sql_user" "app" {
+      project  = "{{ .ProjectId }}"
+      name     = "community"
+      instance = google_sql_database_instance.postgres.name
+      password = random_password.db_password.result
+    }
+
+- uri: template://community/gcp-s3
+  type: s3
+  class: default
+  format: terraform
+  description: Google Cloud Storage bucket with S3 interoperability HMAC keys in Secret Manager.
+  outputs:
+    bucket: "${google_storage_bucket.assets.name}"
+    endpoint: "https://storage.googleapis.com"
+    public_endpoint: "https://storage.googleapis.com"
+    public_base_url: "https://storage.googleapis.com/${google_storage_bucket.assets.name}"
+    region: "${google_storage_bucket.assets.location}"
+    access_key_id: "${google_storage_hmac_key.assets.access_id}"
+    secret_key: "gcpsm:${google_secret_manager_secret_iam_member.s3_secret_key.secret_id}"
+  manifests: |
+    resource "google_storage_bucket" "assets" {
+      project                     = "{{ .ProjectId }}"
+      name                        = "{{ .ProjectId }}-community-assets"
+      location                    = "{{ .Location }}"
+      uniform_bucket_level_access = true
+      force_destroy               = false
+
+      cors {
+        origin          = concat(["https://${var.org_domain}"], [for city in var.launch_cities : "https://${city}.${var.org_domain}"])
+        method          = ["GET", "HEAD", "PUT", "POST", "DELETE"]
+        response_header = ["Content-Type", "ETag"]
+        max_age_seconds = 3600
+      }
+
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_storage_bucket_iam_member" "public_objects" {
+      bucket = google_storage_bucket.assets.name
+      role   = "roles/storage.objectViewer"
+      member = "allUsers"
+
+      condition {
+        title       = "public_prefix_only"
+        description = "Expose only public/* assets"
+        expression  = "resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.assets.name}/objects/public/\")"
+      }
+    }
+
+    resource "google_service_account" "gcs_hmac" {
+      project    = "{{ .ProjectId }}"
+      account_id = "community-gcs-hmac"
+    }
+
+    resource "google_storage_bucket_iam_member" "gcs_hmac_admin" {
+      bucket = google_storage_bucket.assets.name
+      role   = "roles/storage.objectAdmin"
+      member = "serviceAccount:${google_service_account.gcs_hmac.email}"
+    }
+
+    resource "google_storage_hmac_key" "assets" {
+      project               = "{{ .ProjectId }}"
+      service_account_email = google_service_account.gcs_hmac.email
+      depends_on            = [google_storage_bucket_iam_member.gcs_hmac_admin]
+    }
+
+    resource "google_secret_manager_secret" "s3_secret_key" {
+      project   = "{{ .ProjectId }}"
+      secret_id = "community-s3-secret-key"
+      replication {
+        auto {}
+      }
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_secret_manager_secret_version" "s3_secret_key" {
+      secret      = google_secret_manager_secret.s3_secret_key.id
+      secret_data = google_storage_hmac_key.assets.secret
+    }
+
+    resource "google_secret_manager_secret_iam_member" "s3_secret_key" {
+      project    = "{{ .ProjectId }}"
+      secret_id  = google_secret_manager_secret.s3_secret_key.secret_id
+      role       = "roles/secretmanager.secretAccessor"
+      member     = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
+      depends_on = [google_secret_manager_secret_version.s3_secret_key]
+    }
+
+- uri: template://community/gcp-smtp
+  type: smtp
+  class: default
+  format: terraform
+  description: Resend SMTP configuration backed by Secret Manager.
+  outputs:
+    host: "smtp.resend.com"
+    port: "465"
+    username: "resend"
+    password: "gcpsm:${google_secret_manager_secret_iam_member.smtp_password.secret_id}"
+    from: "Cloud Native Canada <no-reply@${var.org_domain}>"
+  manifests: |
+    resource "google_secret_manager_secret" "smtp_password" {
+      project   = "{{ .ProjectId }}"
+      secret_id = "community-smtp-password"
+      replication {
+        auto {}
+      }
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_secret_manager_secret_version" "smtp_password" {
+      secret      = google_secret_manager_secret.smtp_password.id
+      secret_data = var.smtp_password != "" ? var.smtp_password : "replace-with-resend-api-key"
+    }
+
+    resource "google_secret_manager_secret_iam_member" "smtp_password" {
+      project    = "{{ .ProjectId }}"
+      secret_id  = google_secret_manager_secret.smtp_password.secret_id
+      role       = "roles/secretmanager.secretAccessor"
+      member     = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
+      depends_on = [google_secret_manager_secret_version.smtp_password]
+    }

@@ -1,0 +1,14 @@
+.git
+node_modules
+.DS_Store
+.env
+.env.*
+.score-compose
+.score-cloudrun
+compose.yaml
+score.yaml
+score-*.yaml
+infra
+README.md
+.agents
+.claude

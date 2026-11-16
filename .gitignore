@@ -1,0 +1,13 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+!.env.example
+.score-compose/
+.score-cloudrun/
+infra/gcp/.terraform/
+infra/gcp/.terraform.lock.hcl
+infra/gcp/*.tfstate*
+infra/gcp/*.tfvars
+!infra/gcp/terraform.tfvars.example
+infra/gcp/manifests.tf
