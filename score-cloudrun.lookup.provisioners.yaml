@@ -34,23 +34,30 @@
   type: s3
   class: default
   format: terraform
-  description: Looks up an existing GCS bucket and HMAC key managed by foundation Terraform.
+  description: Looks up an existing GCS bucket accessed via keyless Cloud Run Workload Identity.
   outputs:
     bucket: "${data.google_storage_bucket.assets.name}"
     endpoint: "https://storage.googleapis.com"
     public_endpoint: "https://storage.googleapis.com"
-    public_base_url: "${var.s3_public_base_url != "" ? var.s3_public_base_url : "https://storage.googleapis.com/${data.google_storage_bucket.assets.name}"}"
+    public_base_url: "${var.s3_public_base_url != "" ? var.s3_public_base_url : "https://${var.org_domain}/api/assets"}"
     region: "${var.region}"
-    access_key_id: "${data.google_secret_manager_secret_version.s3_access_key_id.secret_data}"
-    secret_key: "gcpsm:community-s3-secret-key"
+    access_key_id: "workload-identity"
+    secret_key: "${google_service_account.web.email}"
   manifests: |
     data "google_storage_bucket" "assets" {
       name = "{{ .ProjectId }}-community-assets"
     }
 
-    data "google_secret_manager_secret_version" "s3_access_key_id" {
-      project = "{{ .ProjectId }}"
-      secret  = "community-s3-access-key-id"
+    resource "google_storage_bucket_iam_member" "web_assets_admin" {
+      bucket = data.google_storage_bucket.assets.name
+      role   = "roles/storage.objectAdmin"
+      member = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
+    }
+
+    resource "google_service_account_iam_member" "web_sign_blob" {
+      service_account_id = google_service_account.{{ .WorkloadName }}.name
+      role               = "roles/iam.serviceAccountTokenCreator"
+      member             = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
     }
 
 - uri: template://community/gcp-lookup-smtp

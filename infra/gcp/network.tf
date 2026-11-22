@@ -6,7 +6,10 @@ locals {
     "secretmanager.googleapis.com",
     "cloudscheduler.googleapis.com",
     "artifactregistry.googleapis.com",
-    "compute.googleapis.com"
+    "compute.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "iam.googleapis.com",
+    "iamcredentials.googleapis.com"
   ]
   extra_apis = concat(
     var.enable_wildcard_lb ? ["certificatemanager.googleapis.com"] : [],

@@ -1,20 +1,43 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import process from 'node:process';
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import nodemailer from 'nodemailer';
 import pg from 'pg';
 
 const port = Number(process.env.PORT || 3000);
 const queueMode = process.env.QUEUE_MODE || 'worker';
 const BANNER_KEY = 'public/devmtl-banner.svg';
+const METADATA_TOKEN_URL = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
+
+let cachedGcsToken = '';
+let cachedGcsExpiryMs = 0;
+
+function isWorkloadIdentityStorage() {
+	return process.env.S3_ACCESS_KEY_ID === 'workload-identity';
+}
+
+async function getGcsAccessToken() {
+	if (process.env.GOOGLE_OAUTH_ACCESS_TOKEN) return process.env.GOOGLE_OAUTH_ACCESS_TOKEN;
+	if (cachedGcsToken && Date.now() < cachedGcsExpiryMs - 60_000) return cachedGcsToken;
+	const res = await fetch(METADATA_TOKEN_URL, {
+		headers: { 'Metadata-Flavor': 'Google' },
+		signal: AbortSignal.timeout(5_000)
+	});
+	if (!res.ok) throw new Error(`Metadata token HTTP ${res.status}`);
+	const data = await res.json();
+	if (!data.access_token) throw new Error('Metadata token missing access_token');
+	cachedGcsToken = data.access_token;
+	cachedGcsExpiryMs = Date.now() + (data.expires_in ?? 300) * 1000;
+	return cachedGcsToken;
+}
 
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : null;
 pool?.on('error', (err) => console.error('[db]', err.message));
 
 function getS3Client() {
 	const { S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY } = process.env;
-	if (!S3_ENDPOINT || !S3_ACCESS_KEY_ID || !S3_SECRET_ACCESS_KEY) return null;
+	if (!S3_ENDPOINT || !S3_ACCESS_KEY_ID || !S3_SECRET_ACCESS_KEY || isWorkloadIdentityStorage()) return null;
 	return new S3Client({
 		endpoint: S3_ENDPOINT,
 		region: S3_REGION || 'us-east-1',
@@ -88,22 +111,96 @@ async function ensureSchema() {
 	}
 }
 
-async function checkStorage() {
+async function headObject(bucket, key) {
+	if (isWorkloadIdentityStorage()) {
+		const token = await getGcsAccessToken();
+		const res = await fetch(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}`, {
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(10_000)
+		});
+		if (res.status === 404) return false;
+		if (!res.ok) throw new Error(`GCS head HTTP ${res.status}`);
+		return true;
+	}
 	const client = getS3Client();
+	if (!client) throw new Error('Object storage not configured');
+	try {
+		await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+		return true;
+	} catch (err) {
+		if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound') return false;
+		throw err;
+	}
+}
+
+async function getObject(bucket, key) {
+	if (isWorkloadIdentityStorage()) {
+		const token = await getGcsAccessToken();
+		const res = await fetch(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}?alt=media`, {
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(15_000)
+		});
+		if (res.status === 404) return null;
+		if (!res.ok) throw new Error(`GCS get HTTP ${res.status}`);
+		return {
+			body: Buffer.from(await res.arrayBuffer()),
+			contentType: res.headers.get('content-type') || 'application/octet-stream'
+		};
+	}
+	const client = getS3Client();
+	if (!client) throw new Error('Object storage not configured');
+	try {
+		const out = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+		const bytes = await out.Body.transformToByteArray();
+		return {
+			body: Buffer.from(bytes),
+			contentType: out.ContentType || 'application/octet-stream'
+		};
+	} catch (err) {
+		if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NoSuchKey') return null;
+		throw err;
+	}
+}
+
+async function putObject(bucket, key, body, contentType, cacheControl) {
+	if (isWorkloadIdentityStorage()) {
+		const token = await getGcsAccessToken();
+		const res = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(key)}`, {
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${token}`,
+				'Content-Type': contentType,
+				...(cacheControl ? { 'Cache-Control': cacheControl } : {})
+			},
+			body,
+			signal: AbortSignal.timeout(15_000)
+		});
+		if (!res.ok) throw new Error(`GCS upload HTTP ${res.status}`);
+		return;
+	}
+	const client = getS3Client();
+	if (!client) throw new Error('Object storage not configured');
+	await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType, CacheControl: cacheControl }));
+}
+
+function bannerUrlFor(base) {
+	if (isWorkloadIdentityStorage()) return `/api/assets/${BANNER_KEY}?t=${Date.now()}`;
+	return `${base}/${BANNER_KEY}?t=${Date.now()}`;
+}
+
+async function checkStorage() {
 	const bucket = process.env.S3_BUCKET;
 	const base = (process.env.S3_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
-	if (!client || !bucket) return { connected: false, bannerUrl: null };
+	if (!bucket || (!isWorkloadIdentityStorage() && !getS3Client())) return { connected: false, bannerUrl: null };
 	try {
-		await client.send(new HeadObjectCommand({ Bucket: bucket, Key: BANNER_KEY }));
-		return { connected: true, bannerUrl: `${base}/${BANNER_KEY}?t=${Date.now()}` };
-	} catch {
-		try {
-			await client.send(new PutObjectCommand({ Bucket: bucket, Key: BANNER_KEY, Body: buildBannerSvg(`Initialized: ${new Date().toISOString().slice(0, 19)}Z`), ContentType: 'image/svg+xml', CacheControl: 'no-store' }));
-			return { connected: true, bannerUrl: `${base}/${BANNER_KEY}?t=${Date.now()}` };
-		} catch (err) {
-			console.error('[s3]', err.message);
-			return { connected: false, bannerUrl: null };
+		const exists = await headObject(bucket, BANNER_KEY);
+		if (!exists) {
+			await putObject(bucket, BANNER_KEY, buildBannerSvg(`Initialized: ${new Date().toISOString().slice(0, 19)}Z`), 'image/svg+xml', 'no-store');
 		}
+		return { connected: true, bannerUrl: bannerUrlFor(base) };
+	} catch (err) {
+		console.error('[storage]', err.message);
+		return { connected: false, bannerUrl: null };
 	}
 }
 
@@ -218,22 +315,41 @@ const server = http.createServer(async (req, res) => {
 
 	if (url.pathname === '/banner' && req.method === 'POST') {
 		try {
-			const client = getS3Client();
-			if (!client || !process.env.S3_BUCKET) throw new Error('Object storage not configured');
-			await client.send(
-				new PutObjectCommand({
-					Bucket: process.env.S3_BUCKET,
-					Key: BANNER_KEY,
-					Body: buildBannerSvg(`S3 Write: ${new Date().toISOString().slice(0, 19)}Z`),
-					ContentType: 'image/svg+xml',
-					CacheControl: 'no-store'
-				})
+			if (!process.env.S3_BUCKET) throw new Error('Object storage not configured');
+			await putObject(
+				process.env.S3_BUCKET,
+				BANNER_KEY,
+				buildBannerSvg(`Storage Write: ${new Date().toISOString().slice(0, 19)}Z`),
+				'image/svg+xml',
+				'no-store'
 			);
-			res.writeHead(303, { location: '/?notice=Banner+updated+in+S3+object+storage' });
+			res.writeHead(303, { location: '/?notice=Banner+updated+in+object+storage' });
 			return res.end();
 		} catch (err) {
 			res.writeHead(303, { location: `/?notice=${encodeURIComponent(err.message)}` });
 			return res.end();
+		}
+	}
+
+	if (url.pathname.startsWith('/api/assets/') && req.method === 'GET') {
+		let key;
+		try {
+			key = decodeURIComponent(url.pathname.slice('/api/assets/'.length));
+		} catch {
+			return sendJson(res, 404, { ok: false, error: 'Not found' });
+		}
+		const segments = key.split('/');
+		if (!key.startsWith('public/') || segments.includes('..') || !process.env.S3_BUCKET) {
+			return sendJson(res, 404, { ok: false, error: 'Not found' });
+		}
+		try {
+			const obj = await getObject(process.env.S3_BUCKET, key);
+			if (!obj) return sendJson(res, 404, { ok: false, error: 'Not found' });
+			res.writeHead(200, { 'content-type': obj.contentType, 'cache-control': 'no-store' });
+			return res.end(obj.body);
+		} catch (err) {
+			console.error('[assets]', err.message);
+			return sendJson(res, 502, { ok: false, error: 'Storage unavailable' });
 		}
 	}
 

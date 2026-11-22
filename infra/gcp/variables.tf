@@ -86,6 +86,12 @@ variable "billing_account_id" {
 
 variable "monthly_budget_usd" {
   type        = number
-  description = "Monthly sandbox billing alert threshold in USD"
+  description = "Monthly sandbox billing alert threshold in the billing account currency"
   default     = 25
+}
+
+variable "budget_currency" {
+  type        = string
+  description = "3-letter currency code matching the GCP billing account (e.g. USD, CAD)"
+  default     = "USD"
 }

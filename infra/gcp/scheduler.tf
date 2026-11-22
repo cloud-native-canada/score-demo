@@ -1,5 +1,6 @@
 locals {
   cron_secret_value = var.cron_secret != "" ? var.cron_secret : random_password.cron_secret.result
+  cron_base_url     = (var.enable_domain_mapping || var.enable_wildcard_lb) ? "https://${var.org_domain}" : google_cloud_run_v2_service.web.uri
 }
 
 resource "google_cloud_scheduler_job" "run_due_jobs" {
@@ -11,7 +12,7 @@ resource "google_cloud_scheduler_job" "run_due_jobs" {
   time_zone   = "UTC"
 
   http_target {
-    uri         = "https://${var.org_domain}/api/cron/run-due-jobs"
+    uri         = "${local.cron_base_url}/api/cron/run-due-jobs"
     http_method = "POST"
     body        = base64encode("{}")
     headers = {
