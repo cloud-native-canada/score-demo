@@ -50,8 +50,8 @@ resource "google_cloud_run_v2_job" "db_bootstrap" {
           name = "DATABASE_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret_iam_member.web_database_url.secret_id
-              version = "latest"
+              secret  = basename(google_secret_manager_secret_iam_member.web_database_url.secret_id)
+              version = google_secret_manager_secret_version.web_database_url.version
             }
           }
         }
@@ -67,8 +67,8 @@ resource "google_cloud_run_v2_job" "db_bootstrap" {
             name = "BOOTSTRAP_HQ_ADMIN_EMAIL"
             value_source {
               secret_key_ref {
-                secret  = google_secret_manager_secret_iam_member.bootstrap_hq_admin_email[0].secret_id
-                version = "latest"
+                secret  = basename(google_secret_manager_secret_iam_member.bootstrap_hq_admin_email[0].secret_id)
+                version = google_secret_manager_secret_version.bootstrap_hq_admin_email[0].version
               }
             }
           }

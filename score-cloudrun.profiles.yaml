@@ -69,8 +69,8 @@
             name = "{{ hclescape $variableName }}"
             value_source {
               secret_key_ref {
-                secret  = "{{ hclescape (slice $variableValue 6) }}"
-                version = "latest"
+                secret  = basename(split("@", "{{ hclescape (slice $variableValue 6) }}")[0])
+                version = length(split("@", "{{ hclescape (slice $variableValue 6) }}")) > 1 ? split("@", "{{ hclescape (slice $variableValue 6) }}")[1] : "latest"
               }
             }
           }
@@ -79,8 +79,8 @@
             name = "{{ hclescape $variableName }}"
             value_source {
               secret_key_ref {
-                secret  = google_secret_manager_secret_iam_member.{{ $workloadName }}_database_url.secret_id
-                version = "latest"
+                secret  = basename(google_secret_manager_secret_iam_member.{{ $workloadName }}_database_url.secret_id)
+                version = google_secret_manager_secret_version.{{ $workloadName }}_database_url.version
               }
             }
           }

@@ -4,8 +4,8 @@
   format: terraform
   description: Binds application secrets and queue mode from Secret Manager and Terraform variables.
   outputs:
-    BETTER_AUTH_SECRET: "gcpsm:${google_secret_manager_secret_iam_member.better_auth_secret.secret_id}"
-    CRON_SECRET: "gcpsm:${google_secret_manager_secret_iam_member.cron_secret.secret_id}"
+    BETTER_AUTH_SECRET: "gcpsm:${google_secret_manager_secret_iam_member.better_auth_secret.secret_id}@${google_secret_manager_secret_version.better_auth_secret.version}"
+    CRON_SECRET: "gcpsm:${google_secret_manager_secret_iam_member.cron_secret.secret_id}@${google_secret_manager_secret_version.cron_secret.version}"
     QUEUE_MODE: "webhook"
   manifests: |
     resource "random_password" "better_auth_secret" {
@@ -169,7 +169,7 @@
     host: "smtp.resend.com"
     port: "465"
     username: "resend"
-    password: "gcpsm:${google_secret_manager_secret_iam_member.smtp_password.secret_id}"
+    password: "gcpsm:${google_secret_manager_secret_iam_member.smtp_password.secret_id}@${google_secret_manager_secret_version.smtp_password.version}"
     from: "Cloud Native Canada <no-reply@${var.org_domain}>"
   manifests: |
     resource "google_secret_manager_secret" "smtp_password" {
