@@ -3,11 +3,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+compose.yaml
 .score-compose/
 .score-cloudrun/
-infra/gcp/.terraform/
-infra/gcp/.terraform.lock.hcl
-infra/gcp/*.tfstate*
-infra/gcp/*.tfvars
-!infra/gcp/terraform.tfvars.example
-infra/gcp/manifests.tf
+infra/gcp/*
+!infra/gcp/.gitkeep
