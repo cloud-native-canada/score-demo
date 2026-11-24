@@ -39,7 +39,7 @@
     bucket: "${data.google_storage_bucket.assets.name}"
     endpoint: "https://storage.googleapis.com"
     public_endpoint: "https://storage.googleapis.com"
-    public_base_url: "${var.s3_public_base_url != "" ? var.s3_public_base_url : "https://${var.org_domain}/api/assets"}"
+    public_base_url: '${var.s3_public_base_url != "" ? var.s3_public_base_url : "https://${var.org_domain}/api/assets"}'
     region: "${var.region}"
     access_key_id: "workload-identity"
     secret_key: "${google_service_account.web.email}"
@@ -71,3 +71,19 @@
     username: "resend"
     password: "gcpsm:community-smtp-password"
     from: "Cloud Native Canada <no-reply@${var.org_domain}>"
+
+- uri: template://community/gcp-lookup-redis
+  type: redis
+  class: default
+  format: terraform
+  description: Looks up an existing Memorystore for Redis instance and binds its Secret Manager password.
+  outputs:
+    host: "${data.google_redis_instance.cache.host}"
+    port: "${data.google_redis_instance.cache.port}"
+    username: ""
+    password: "gcpsm:community-redis-password"
+  manifests: |
+    data "google_redis_instance" "cache" {
+      project = "{{ .ProjectId }}"
+      name    = "community-redis"
+    }

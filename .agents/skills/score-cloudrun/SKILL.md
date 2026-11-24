@@ -1,52 +1,109 @@
 ---
 name: score-cloudrun
-description: Translate score.yaml into deterministic Cloud Run Terraform (infra/gcp/manifests.tf) using score-cloudrun and platform templates. Use when preparing or validating Google Cloud Run deployments without editing score.yaml.
+description: Compile score.yaml into deterministic Google Cloud Run Terraform (manifests.tf) or Config Connector (KCC) manifests with score-cloudrun, and author custom *.provisioners.yaml and *.profiles.yaml templates. Use when generating or validating Cloud Run deployments, configuring Secret Manager or Workload Identity bindings, or authoring Cloud Run profiles and provisioners. Do not use to author score.yaml from scratch (use score) or to run local Docker Compose stacks (use score-compose or local-dev).
 ---
 
-# Deploy to Cloud Run (`score-cloudrun`)
+# Deploy to Cloud Run with `score-cloudrun`
 
-Compile [`score.yaml`](../../score.yaml) into `infra/gcp/manifests.tf` with `score-cloudrun`.
+`score-cloudrun` compiles portable `score.yaml` workloads into deterministic Terraform HCL (default) or Config Connector (KCC) YAML for Google Cloud Run.
 
 ## Core rules
 
-- Keep `score.yaml` unchanged across local and cloud deploys.
-- Never deploy Cloud Run with ad-hoc `gcloud run deploy --set-env-vars` commands.
-- Apply Terraform before live demos so stage commands only inspect `infra/gcp/manifests.tf`.
-- Store secrets in Secret Manager via `gcpsm:` outputs or `terraform.tfvars`.
+- Keep `score.yaml` unchanged across local Compose and Cloud Run deployments.
+- Never deploy with ad-hoc `gcloud run deploy --set-env-vars` commands. Generate declarative manifests through `score-cloudrun`.
+- Store secrets in Secret Manager and bind them via `value_source.secret_key_ref`, never plaintext `env.value` in Cloud Run revisions.
+- Never embed `/cloudsql/` Unix sockets in `score.yaml`. Use Direct VPC Egress with Private IP `host:port`.
 
-## Generate manifests
+## Step 1: Discover repository context first
 
-1. Initialize `.score-cloudrun/` with our platform provisioners and profiles:
+Inspect `docs/`, `AGENTS.md`, `infra/`, `.gitignore`, `*.provisioners.yaml` (including split-state `*.lookup.provisioners.yaml`), and `*.profiles.yaml` before running commands:
+
+1. Reuse the repository's documented output path (often a gitignored `manifests.tf` inside an existing Terraform root), target region, provisioners, and profiles.
+2. Check if the repository documents a split-state lookup provisioner file for production versus a sandbox provisioner file for demos.
+3. Check for a post-deploy migration or bootstrap Cloud Run Job documented in `docs/` or `infra/`.
+
+## Prerequisites
+
+- `score-cloudrun` on `PATH` (`score-cloudrun --version`). Install from [score-spec/score-cloudrun](https://github.com/score-spec/score-cloudrun).
+- `terraform` (`terraform version`) for Terraform output, or `kubectl` for KCC output.
+
+Ask before installing tools globally.
+
+## Core CLI workflow
+
+`score-cloudrun init` creates gitignored `.score-cloudrun/`, writes the built-in `default-terraform.profiles.yaml` (unless overridden or `--no-default-profile` is passed), and installs **zero** default resource provisioners. Every resource declared in `score.yaml` needs a matching provisioner loaded via `--provisioners`:
 
 ```bash
 score-cloudrun init \
   --no-sample \
-  --provisioners score-cloudrun.provisioners.yaml \
-  --profiles score-cloudrun.profiles.yaml
+  --provisioners <path-or-url-to.provisioners.yaml> \
+  --profiles <path-or-url-to.profiles.yaml>
 ```
 
-2. Generate `infra/gcp/manifests.tf` for the target image URI:
+Inspect active state before generating:
+
+```bash
+score-cloudrun profiles list --format table
+score-cloudrun provisioners list --format table
+```
+
+Generate Terraform (default `--output-format terraform`):
 
 ```bash
 score-cloudrun generate score.yaml \
   --project-id "$GCP_PROJECT_ID" \
-  --location us-east4 \
+  --location "$GCP_REGION" \
   --image "$IMAGE_URI" \
   -o infra/gcp/manifests.tf
 ```
 
-## Validate and apply
-
-1. Run Terraform in `infra/gcp/`:
+Validate the generated Terraform (and apply only when requested):
 
 ```bash
 terraform -chdir=infra/gcp init
+terraform -chdir=infra/gcp validate
 terraform -chdir=infra/gcp plan -var="app_image=$IMAGE_URI"
-terraform -chdir=infra/gcp apply -var="app_image=$IMAGE_URI"
 ```
 
-2. Run the database bootstrap job after deploying a new image:
+## Common tasks
+
+### Target Cloud Run Jobs or source-based Functions
+
+- **Cloud Run Job:** Set `metadata.annotations["cloudrun.score.dev/workload-profile"]: job` in `score.yaml` (or via `--overrides-file`) and load a `job` profile.
+- **Source build (`--source`):** Pass `--source ./app` and set `metadata.annotations["cloudrun.score.dev/base-image"]` (required) plus optional `cloudrun.score.dev/function-name`.
+
+### Generate Config Connector (KCC) manifests
+
+Load `format: kcc` profiles and provisioners, then pass `--output-format kcc`:
 
 ```bash
-gcloud run jobs execute community-db-bootstrap --region us-east4 --wait
+score-cloudrun generate score.yaml \
+  --output-format kcc \
+  --project-id "$GCP_PROJECT_ID" \
+  --location "$GCP_REGION" \
+  --image "$IMAGE_URI" \
+  -o manifests.yaml
 ```
+
+### Apply overrides safely
+
+```bash
+score-cloudrun generate score.yaml \
+  --project-id "$GCP_PROJECT_ID" \
+  --location "$GCP_REGION" \
+  --image "$IMAGE_URI" \
+  --overrides-file prod.score.yaml \
+  --override-property 'metadata.annotations.cloudrun\.score\.dev/workload-profile="job"'
+```
+
+`--image`, `--overrides-file`, and `--override-property` require **exactly one** Score file argument on `generate`.
+
+## Unsupported Score fields
+
+- Cloud Run Services do not support `readinessProbe` or `containers.*.resources.requests`.
+- The built-in default profile skips `PORT` in `env` (Cloud Run reserves `PORT` and sets it from `service.ports.*.targetPort`) and does not render `files`, `volumes`, or `before`.
+
+## Reference files
+
+- [references/provisioners-and-profiles.md](references/provisioners-and-profiles.md) — Verified Go template contracts, `cmd://` unsupported warning, Secret Manager `gcpsm:`, split-state lookup, Direct VPC, keyless GCS Workload Identity, and Cloud Run Jobs.
+- [references/troubleshooting.md](references/troubleshooting.md) — Common CLI errors, `PORT` rejections, IAM/Secret Manager race fixes, and state resets.

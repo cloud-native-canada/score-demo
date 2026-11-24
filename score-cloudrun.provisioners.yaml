@@ -193,3 +193,52 @@
       member     = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
       depends_on = [google_secret_manager_secret_version.smtp_password]
     }
+
+- uri: template://community/gcp-redis
+  type: redis
+  class: default
+  format: terraform
+  description: Memorystore for Redis instance on the shared VPC with password stored in Secret Manager.
+  outputs:
+    host: "${google_redis_instance.cache.host}"
+    port: "${google_redis_instance.cache.port}"
+    username: ""
+    password: "gcpsm:${google_secret_manager_secret_iam_member.redis_password.secret_id}@${google_secret_manager_secret_version.redis_password.version}"
+  manifests: |
+    resource "random_id" "redis_suffix" {
+      byte_length = 4
+    }
+
+    resource "google_redis_instance" "cache" {
+      project            = "{{ .ProjectId }}"
+      name               = "community-redis-${random_id.redis_suffix.hex}"
+      region             = "{{ .Location }}"
+      tier               = "BASIC"
+      memory_size_gb     = 1
+      redis_version      = "REDIS_7_2"
+      auth_enabled       = true
+      authorized_network = google_compute_network.vpc.id
+      depends_on         = [google_project_service.apis]
+    }
+
+    resource "google_secret_manager_secret" "redis_password" {
+      project   = "{{ .ProjectId }}"
+      secret_id = "community-redis-password"
+      replication {
+        auto {}
+      }
+      depends_on = [google_project_service.apis]
+    }
+
+    resource "google_secret_manager_secret_version" "redis_password" {
+      secret      = google_secret_manager_secret.redis_password.id
+      secret_data = google_redis_instance.cache.auth_string
+    }
+
+    resource "google_secret_manager_secret_iam_member" "redis_password" {
+      project    = "{{ .ProjectId }}"
+      secret_id  = google_secret_manager_secret.redis_password.secret_id
+      role       = "roles/secretmanager.secretAccessor"
+      member     = "serviceAccount:${google_service_account.{{ .WorkloadName }}.email}"
+      depends_on = [google_secret_manager_secret_version.redis_password]
+    }
