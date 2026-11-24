@@ -62,6 +62,10 @@
       depends_on = [google_secret_manager_secret_version.cron_secret]
     }
 
+    locals {
+      cron_secret_value = var.cron_secret != "" ? var.cron_secret : random_password.cron_secret.result
+    }
+
 - uri: template://community/gcp-postgres
   type: postgres
   class: default

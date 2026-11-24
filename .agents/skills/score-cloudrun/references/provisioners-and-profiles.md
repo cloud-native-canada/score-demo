@@ -21,6 +21,7 @@ Required fields: `uri` (valid URL with scheme, e.g. `template://...`), `type`. O
 Required fields: `id`, `name`, `format`. Optional: `description`, `manifests`.
 
 - `manifests` Go template context: `.WorkloadName`, `.Spec`, `.Location`, `.ProjectId`, `.Image`, `.BuildConfig` (`.SourcePath`, `.BaseImage`, `.FunctionName`).
+- `.Spec.Resources` inside profiles contains resolved `.Params` for each declared resource, whereas provisioner `manifests` templates receive only `.WorkloadName`, `.Location`, and `.ProjectId`.
 
 ## Production Cloud Run patterns
 

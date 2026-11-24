@@ -7,6 +7,15 @@
     BETTER_AUTH_SECRET: "gcpsm:community-better-auth-secret"
     CRON_SECRET: "gcpsm:community-cron-secret"
     QUEUE_MODE: "webhook"
+  manifests: |
+    data "google_secret_manager_secret_version" "cron_secret" {
+      project = "{{ .ProjectId }}"
+      secret  = "community-cron-secret"
+    }
+
+    locals {
+      cron_secret_value = var.cron_secret != "" ? var.cron_secret : data.google_secret_manager_secret_version.cron_secret.secret_data
+    }
 
 - uri: template://community/gcp-lookup-postgres
   type: postgres
@@ -39,11 +48,15 @@
     bucket: "${data.google_storage_bucket.assets.name}"
     endpoint: "https://storage.googleapis.com"
     public_endpoint: "https://storage.googleapis.com"
-    public_base_url: '${var.s3_public_base_url != "" ? var.s3_public_base_url : "https://${var.org_domain}/api/assets"}'
+    public_base_url: "${local.s3_public_base_url}"
     region: "${var.region}"
     access_key_id: "workload-identity"
     secret_key: "${google_service_account.web.email}"
   manifests: |
+    locals {
+      s3_public_base_url = var.s3_public_base_url != "" ? var.s3_public_base_url : "https://${var.org_domain}/api/assets"
+    }
+
     data "google_storage_bucket" "assets" {
       name = "{{ .ProjectId }}-community-assets"
     }

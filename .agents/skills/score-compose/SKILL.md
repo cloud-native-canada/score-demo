@@ -1,11 +1,11 @@
 ---
 name: score-compose
-description: Compile score.yaml into Docker Compose with score-compose, inspect provisioned resources, and author custom *.provisioners.yaml or --patch-templates. Use when generating or validating local Compose output, wiring or debugging local resource provisioners, exposing ports, or applying Score overrides. Do not use to author score.yaml from scratch (use score) or to run ordinary app startup when a repo runner like local-dev exists.
+description: Compile score.yaml into Docker Compose with score-compose and inspect platform-provided resource provisioners. Use when generating or validating local Compose output, checking supported resource types and outputs, exposing ports, or applying Score overrides. Do not use to author score.yaml from scratch (use score) or to run ordinary app startup when a repo runner like local-dev exists.
 ---
 
 # Run Score locally with `score-compose`
 
-`score-compose` compiles one or more `score.yaml` workloads into a Docker Compose project and provisions declared resources locally.
+`score-compose` compiles one or more `score.yaml` workloads into a Docker Compose project and provisions declared resources locally. Treat this skill as an advisory starting point. Platform teams typically publish governed `*.provisioners.yaml` recipes centrally so local Compose mirrors production. Consume the repository's configured provisioners rather than authoring custom provisioners unless asked.
 
 ## Step 1: Discover repository context first
 
@@ -23,7 +23,7 @@ Treat `score-compose` strictly as the **compiler**, and treat the repo runner as
 ### Mode B: Standalone Score repository (no wrapper)
 
 ```bash
-score-compose init --no-sample [--project <name>] [--provisioners <file-or-uri>]
+score-compose init --no-sample [--no-default-provisioners] [--project <name>] [--provisioners <file-or-uri>]
 score-compose generate score.yaml [--build <container>=<dir> | --image <img:tag>] [--publish <host>:<workload>:<port>]
 docker compose up -d --wait
 ```
@@ -38,6 +38,7 @@ If `score-compose` is missing in Mode B, tell the user how to install it. Ask be
 ## Core CLI mechanics and state
 
 - `init` creates `.score-compose/` (keep it out of git). Run `init` first, or `generate` fails with `"state directory does not exist"`.
+- Pass `--no-default-provisioners` on `init` when a platform team supplies a curated `*.provisioners.yaml` catalog and wants `provisioners list` to show only approved resource types.
 - **State accumulates.** Running `generate a.yaml` then `generate b.yaml` combines both workloads. Running `generate` with no arguments regenerates from stored workloads.
 - Re-running `generate` reuses stored resource names and passwords in `.score-compose/state.yaml`. Delete `.score-compose/` to reset state.
 - Check installed versions in scripts or CI with `score-compose check-version '>=0.49.0'`.
@@ -100,5 +101,5 @@ score-compose generate score.yaml --override-property 'resources.cache='
 ## Reference files
 
 - [references/resources.md](references/resources.md) — All 15 built-in provisioners, outputs, params, annotations, and MinIO image warning.
-- [references/provisioners-and-patches.md](references/provisioners-and-patches.md) — Custom `template://` and `cmd://` provisioners, URI schemes, `--patch-templates`, and Compose overrides.
+- [references/provisioners-and-patches.md](references/provisioners-and-patches.md) — Platform engineering reference: custom `template://`, `local-env://`, and `cmd://` provisioners, URI schemes, and `--patch-templates`.
 - [references/troubleshooting.md](references/troubleshooting.md) — Verified CLI errors, escaping issues, port clashes, and state resets.

@@ -1,11 +1,11 @@
 ---
 name: score-cloudrun
-description: Compile score.yaml into deterministic Google Cloud Run Terraform (manifests.tf) or Config Connector (KCC) manifests with score-cloudrun, and author custom *.provisioners.yaml and *.profiles.yaml templates. Use when generating or validating Cloud Run deployments, configuring Secret Manager or Workload Identity bindings, or authoring Cloud Run profiles and provisioners. Do not use to author score.yaml from scratch (use score) or to run local Docker Compose stacks (use score-compose or local-dev).
+description: Compile score.yaml into deterministic Google Cloud Run Terraform (manifests.tf) or Config Connector (KCC) manifests with score-cloudrun using platform-provided provisioners and profiles. Use when generating or validating Cloud Run deployments, inspecting available Cloud Run resource types, or applying Score overrides. Do not use to author score.yaml from scratch (use score) or to run local Docker Compose stacks (use score-compose or local-dev).
 ---
 
 # Deploy to Cloud Run with `score-cloudrun`
 
-`score-cloudrun` compiles portable `score.yaml` workloads into deterministic Terraform HCL (default) or Config Connector (KCC) YAML for Google Cloud Run.
+`score-cloudrun` compiles portable `score.yaml` workloads into deterministic Terraform HCL (default) or Config Connector (KCC) YAML for Google Cloud Run. Treat this skill as an advisory starting point. Platform engineers maintain governed `*.provisioners.yaml` and `*.profiles.yaml` templates centrally. Developers consume those templates with `init`, `provisioners list`, and `generate` rather than authoring Terraform or custom provisioners in daily work.
 
 ## Core rules
 
@@ -62,7 +62,7 @@ Validate the generated Terraform (and apply only when requested):
 ```bash
 terraform -chdir=infra/gcp init
 terraform -chdir=infra/gcp validate
-terraform -chdir=infra/gcp plan -var="app_image=$IMAGE_URI"
+terraform -chdir=infra/gcp plan
 ```
 
 ## Common tasks
@@ -105,5 +105,5 @@ score-cloudrun generate score.yaml \
 
 ## Reference files
 
-- [references/provisioners-and-profiles.md](references/provisioners-and-profiles.md) — Verified Go template contracts, `cmd://` unsupported warning, Secret Manager `gcpsm:`, split-state lookup, Direct VPC, keyless GCS Workload Identity, and Cloud Run Jobs.
+- [references/provisioners-and-profiles.md](references/provisioners-and-profiles.md) — Platform engineering reference: verified Go template contracts, Secret Manager `gcpsm:`, split-state lookup, Direct VPC, keyless GCS Workload Identity, and Cloud Run Jobs.
 - [references/troubleshooting.md](references/troubleshooting.md) — Common CLI errors, `PORT` rejections, IAM/Secret Manager race fixes, and state resets.

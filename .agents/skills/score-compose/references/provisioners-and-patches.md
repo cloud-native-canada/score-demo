@@ -19,6 +19,14 @@ Supported URI schemes for `--provisioners` and `--patch-templates`:
 
 Files in `.score-compose/*.provisioners.yaml` load in lexicographic order. The first provisioner matching `(type, class, id)` wins. Downloaded files use a reverse-timestamp prefix so custom files automatically sort ahead of `zz-default.provisioners.yaml`.
 
+Passing `--no-default-provisioners` skips writing `zz-default.provisioners.yaml` so `score-compose provisioners list` shows only your platform catalog. If your catalog still uses `type: environment`, include the built-in local env provisioner:
+
+```yaml
+- uri: local-env://default-provisioners/environment
+  type: environment
+  description: Pulls values out of the local environment as outputs to an environment resource.
+```
+
 ## `template://` provisioners schema
 
 Supported YAML fields on each item in `*.provisioners.yaml`:

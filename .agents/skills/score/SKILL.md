@@ -5,11 +5,12 @@ description: Author, edit, migrate, and validate platform-agnostic CNCF Score wo
 
 # Author portable Score workloads (`score.yaml`)
 
-Write one platform-agnostic `score.yaml` (`score.dev/v1b1`) that compiles cleanly with both `score-compose` and `score-cloudrun`.
+Write one platform-agnostic `score.yaml` (`score.dev/v1b1`) that compiles cleanly with both `score-compose` and `score-cloudrun`. Treat this skill as an advisory starting point and adapt conventions to your repository's platform contracts.
 
 ## Core rules
 
 - Keep `score.yaml` free of cloud vendor names, static secrets, localhost URLs, and platform-specific endpoints.
+- When creating `score.yaml` from scratch, derive it from application code, `Dockerfile`, env templates, and active provisioners. Never copy or recover a deleted `score.yaml` from `git status`, `git diff`, or `git log` unless asked.
 - Use `image: .` when the repository builds its own container image from a `Dockerfile`.
 - Express every backing dependency under `resources:` and wire it into `containers.<name>.variables` with `${resources.<name>.<output>}`.
 - Pass runtime secrets through a `type: environment` resource, never as literal values in `score.yaml`.
@@ -21,8 +22,8 @@ Write one platform-agnostic `score.yaml` (`score.dev/v1b1`) that compiles cleanl
 Inspect the repository before drafting or editing `score.yaml`:
 
 1. Read `Dockerfile`, `.env.example`, and application config code to list every required env var, port, health route, and backing service.
-2. Inspect `README.md`, `Makefile`, `package.json`, `infra/` (such as Terraform `google_cloud_run_v2_service.<workload>` references), `compose.yaml`, `docs/`, and `AGENTS.md`. Reuse any workload name (`metadata.name`), container name (`containers.<name>`), or port key (`service.ports.<name>`) that scripts or Terraform modules expect.
-3. Read every `*.provisioners.yaml` and `*.profiles.yaml` in the repository first. Map each app variable to exact `outputs` keys across all target provisioners (including custom keys like `public_endpoint`, `public_base_url`, `from`, and custom `environment` outputs) instead of copying `.env.example` literals.
+2. Inspect `README.md`, `Makefile`, `package.json`, `docs/`, and `AGENTS.md` to reuse any expected workload name (`metadata.name`), container name (`containers.<name>`), or port key (`service.ports.<name>`). When creating `score.yaml` from scratch, do not copy deleted `score.yaml` files or previously generated `compose.yaml` or `manifests.tf` files.
+3. Run `score-compose provisioners list` and `score-cloudrun provisioners list` (or read `*.provisioners.yaml` and `*.profiles.yaml`) to see which resource types and output keys the platform team publishes. Map each app variable to exact `outputs` keys across all target provisioners (including custom keys like `public_endpoint`, `public_base_url`, `from`, and custom `environment` outputs) instead of copying `.env.example` literals.
 
 ## Workflow 1: Create `score.yaml` from an existing app
 

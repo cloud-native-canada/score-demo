@@ -14,6 +14,11 @@
 # `score-compose init --provisioners score-compose.provisioners.yaml` copies this file into `.score-compose/`.
 # After you change this file, run init and generate again (see docs/local-dev.md).
 
+# resources.env -> host environment variables and .env file bindings.
+- uri: local-env://default-provisioners/environment
+  type: environment
+  description: Pulls values out of the local environment or .env file as outputs to an environment resource.
+
 # resources.db -> one Postgres 17 database. Host port 5432.
 - uri: template://community/postgres
   type: postgres
@@ -157,3 +162,40 @@
     - username
     - password
     - from
+
+# resources.cache -> local Redis 7 instance on host port 6379.
+- uri: template://community/redis
+  type: redis
+  description: Dedicated local Redis 7 instance with fixed local password, published on host port 6379.
+  outputs: |
+    host: redis
+    port: 6379
+    username: default
+    password: community
+  volumes: |
+    redis-data:
+      driver: local
+  services: |
+    redis:
+      image: mirror.gcr.io/redis:7-alpine
+      command: ["redis-server", "--requirepass", "community", "--save", "60", "1", "--loglevel", "warning"]
+      restart: unless-stopped
+      ports:
+        - target: 6379
+          published: "6379"
+      volumes:
+        - type: volume
+          source: redis-data
+          target: /data
+      healthcheck:
+        test: ["CMD", "redis-cli", "-a", "community", "ping"]
+        interval: 2s
+        timeout: 2s
+        retries: 15
+  info_logs: |
+    - "{{ .Uid }}: Redis 7 is at redis://default:community@localhost:6379"
+  expected_outputs:
+    - host
+    - port
+    - username
+    - password

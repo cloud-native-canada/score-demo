@@ -17,6 +17,10 @@ Common errors, Cloud Run deployment caveats, and verified fixes.
 
 - Run `score-cloudrun init --no-sample --provisioners <file> --profiles <file>` before `generate`.
 
+### `failed to write output file: open <dir>/manifests.tf.tmp: no such file or directory`
+
+- `score-cloudrun generate -o <dir>/manifests.tf` does not create parent directories automatically. Create `<dir>` first (`mkdir -p <dir>` or commit `<dir>/.gitkeep`) before running `generate`.
+
 ### `"no Google Cloud location specified"` or `"no Google Cloud Project ID specified"`
 
 - Pass both `--location <region>` and `--project-id <project-id>` on every `score-cloudrun generate` call.
