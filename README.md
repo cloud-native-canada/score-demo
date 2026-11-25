@@ -6,21 +6,18 @@ Platform engineers govern [`score-compose.provisioners.yaml`](score-compose.prov
 
 ## Clean-Slate Check Before Act 1
 
-Confirm the repository has no committed `compose.yaml` and no Terraform `.tf` files before starting:
+Run the `Cleanup & Reset Between Rehearsals` commands at the bottom if you previously ran a demo locally, then confirm the workspace starts empty:
 
 ```bash
 git status -s
-ls -la compose.yaml infra/gcp/
+ls -la score.yaml compose.yaml infra/gcp/
 ```
 
-`compose.yaml` is missing (`No such file or directory`), and `infra/gcp/` contains only `.gitkeep`.
+`score.yaml` and `compose.yaml` are absent (`No such file or directory`), and `infra/gcp/` contains only `.gitkeep`.
 
 ## Act 1: Inspect Platform Catalog & Generate `score.yaml` (`score` skill)
 
-[`score.yaml`](score.yaml) is pre-committed so visitors can inspect the contract immediately. To demonstrate creating it live from application code:
-
-1. Remove [`score.yaml`](score.yaml) (`rm score.yaml`).
-2. Initialize both Score target state folders **once** for the demo and list the approved platform catalog:
+1. Initialize both Score target state folders **once** for the demo and list the approved platform catalog:
 
 ```bash
 # Creates gitignored .score-compose/ and registers only the platform team's 5 local recipes (skips sample score.yaml and built-in defaults)
@@ -34,21 +31,29 @@ score-cloudrun provisioners list
 
 Notice both commands expose the exact same five resource types (`environment`, `postgres`, `redis`, `s3`, `smtp`).
 
-3. Ask your coding agent (using [`.agents/skills/score/SKILL.md`](.agents/skills/score/SKILL.md)) to generate a portable `score.yaml` from [`Dockerfile`](Dockerfile), [`.env.example`](.env.example), [`server/index.js`](server/index.js), and the `provisioners list` contracts without reading git history.
-4. Continue into Acts 2 and 3 with zero edits to the generated file.
+2. Prompt your coding agent naturally using your app context:
 
-## Act 2: Run locally with `score-compose` skill
+   > *"Create a portable `score.yaml` for this app based on the `Dockerfile`, `.env.example`, `server/index.js`, and the available provisioners so I can run it locally with Docker Compose and deploy it to Cloud Run."*
+
+3. Continue into Acts 2 and 3 with zero edits to the generated file.
+
+## Act 2: Run locally with `score-compose`
 
 `.score-compose/` is already initialized from Act 1, so do not repeat `score-compose init`.
 
-1. Copy `.env.example` to `.env` and set `BETTER_AUTH_SECRET`:
+1. Copy `.env.example` to `.env` and generate a random 64-char hex `BETTER_AUTH_SECRET`:
 
 ```bash
 cp .env.example .env
+SECRET=$(openssl rand -hex 32)
+node -e 'const fs=require("fs"); fs.writeFileSync(".env", fs.readFileSync(".env","utf8").replace("replace-with-32-char-random-secret", process.argv[1]))' "$SECRET"
 ```
 
-2. Ask your coding agent using [`.agents/skills/score-compose/SKILL.md`](.agents/skills/score-compose/SKILL.md):
-   *"Use the `score-compose` skill to generate `compose.yaml` and run this app locally on port 3000."*
+   Or run `openssl rand -hex 32` and paste the value into `BETTER_AUTH_SECRET=` in `.env` manually.
+
+2. Prompt your coding agent:
+
+   > *"Run this app locally on port 3000 with Docker Compose using `score.yaml`."*
 
    Or run the deterministic CLI commands directly as fallback:
 
@@ -90,9 +95,32 @@ See [`.agents/skills/score-cloudrun/SKILL.md`](.agents/skills/score-cloudrun/SKI
 
 ## Act 4: Day-2 Evolution — Add a new `redis` intent to `score.yaml`
 
-A developer adds a new dependency in [`score.yaml`](score.yaml) with zero infrastructure YAML:
+A developer adds a new dependency in [`score.yaml`](score.yaml) with zero infrastructure YAML.
 
-1. Either ask your coding agent (*"Use the `score` skill to add a `redis` cache resource (`REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`) to `score.yaml`."*) or run this one-liner from the repo root:
+### 1. Update `score.yaml` (Prompt, Manual Editor, or CLI)
+
+- **Natural developer prompt:**
+
+  > *"I need a Redis cache for this app—add it to `score.yaml` with `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD`."*
+
+- **Manual edit (`vim score.yaml` or editor):** Add `REDIS_*` variables under `containers.app.variables` and `cache` under `resources`:
+
+```yaml
+containers:
+  app:
+    variables:
+      # ...existing variables...
+      REDIS_HOST: "${resources.cache.host}"
+      REDIS_PORT: "${resources.cache.port}"
+      REDIS_PASSWORD: "${resources.cache.password}"
+
+resources:
+  # ...existing resources...
+  cache:
+    type: redis
+```
+
+- **Copy-paste CLI one-liner:**
 
 ```bash
 node -e '
@@ -106,27 +134,42 @@ fs.writeFileSync("score.yaml", y);
 ' && git diff score.yaml
 ```
 
-2. Regenerate both targets from the exact same `score.yaml`:
+### 2. Demonstrate Local Compose (`score-compose`)
 
 ```bash
 score-compose generate score.yaml --build app=. --publish 3000:web:3000
+grep -n -C 3 "redis" compose.yaml
+docker compose up -d --wait
+docker compose exec redis redis-cli -a community ping
+# Expected output: PONG
+```
+
+`score-compose` provisions a dedicated local Redis 7 container from [`score-compose.provisioners.yaml`](score-compose.provisioners.yaml).
+
+### 3. Demonstrate Google Cloud Run Terraform (`score-cloudrun`)
+
+```bash
 score-cloudrun generate score.yaml \
   --project-id "$GCP_PROJECT_ID" \
   --location us-east4 \
   --image "$IMAGE_URI" \
   -o infra/gcp/manifests.tf
+
+grep -n -C 3 'google_redis_instance\|redis.googleapis.com\|REDIS_PASSWORD' infra/gcp/manifests.tf
+terraform -chdir=infra/gcp validate
+terraform -chdir=infra/gcp plan
 ```
 
-- `score-compose` provisions a dedicated local Redis 7 container from `score-compose.provisioners.yaml`.
-- `score-cloudrun` provisions `google_redis_instance.cache` (Memorystore on the VPC), enables `redis.googleapis.com`, stores `auth_string` in Secret Manager, and injects `REDIS_PASSWORD` into Cloud Run via `value_source.secret_key_ref`.
+`score-cloudrun` enables `redis.googleapis.com`, provisions `google_redis_instance.cache` on the VPC, stores `auth_string` in Secret Manager, and injects `REDIS_PASSWORD` into Cloud Run via `value_source.secret_key_ref`.
 
 ## Cleanup & Reset Between Rehearsals
 
-Stop local containers, remove generated files, and restore `score.yaml` (`rm score.yaml` afterward if priming for Act 1):
+Stop local containers and remove `score.yaml` plus generated files so Act 1 starts clean:
 
 ```bash
 [ -f compose.yaml ] && docker compose down -v || true
-rm -rf .env compose.yaml .score-compose .score-cloudrun
+rm -rf .env compose.yaml score.yaml .score-compose .score-cloudrun
 find infra/gcp -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} +
-git checkout -- score.yaml
 ```
+
+Run `git checkout -- score.yaml` to restore the reference `score.yaml` after the demo.
