@@ -1,6 +1,6 @@
 ---
 name: score
-description: Author, edit, migrate, and validate platform-agnostic CNCF Score workload files (score.yaml, score.dev/v1b1). Use when creating a score.yaml from an existing application or Dockerfile, migrating from docker-compose.yaml, adding backing resources or secrets, or checking portability across score-compose and score-cloudrun. Do not use for running Docker Compose or Terraform directly (use score-compose or score-cloudrun for target execution).
+description: Initialize Score target state, inspect platform provisioner catalogs (provisioners list), and author, edit, migrate, and validate platform-agnostic CNCF Score workload files (score.yaml, score.dev/v1b1). Use when initializing Score targets, listing available provisioners, creating a Score file from an existing application or Dockerfile (including voice-transcribed requests like "score file", "score spec", "score,yaml", or "score dot yaml"), migrating from docker-compose.yaml, adding backing resources or secrets, or checking portability across score-compose and score-cloudrun. Do not use for starting Docker Compose containers or running Terraform directly (use score-compose or score-cloudrun).
 ---
 
 # Author portable Score workloads (`score.yaml`)
@@ -23,7 +23,23 @@ Inspect the repository before drafting or editing `score.yaml`:
 
 1. Read `Dockerfile`, `.env.example`, and application config code to list every required env var, port, health route, and backing service.
 2. Inspect `README.md`, `Makefile`, `package.json`, `docs/`, and `AGENTS.md` to reuse any expected workload name (`metadata.name`), container name (`containers.<name>`), or port key (`service.ports.<name>`). When creating `score.yaml` from scratch, do not copy deleted `score.yaml` files or previously generated `compose.yaml` or `manifests.tf` files.
-3. Run `score-compose provisioners list` and `score-cloudrun provisioners list` (or read `*.provisioners.yaml` and `*.profiles.yaml`) to see which resource types and output keys the platform team publishes. Map each app variable to exact `outputs` keys across all target provisioners (including custom keys like `public_endpoint`, `public_base_url`, `from`, and custom `environment` outputs) instead of copying `.env.example` literals.
+3. Run `score-compose provisioners list` and `score-cloudrun provisioners list` to see which resource types and output keys the platform team publishes. If `.score-compose/` or `.score-cloudrun/` does not exist yet in a standalone Score repository, initialize them first using **Workflow 0** below. Map each app variable to exact `outputs` keys across all target provisioners (including custom keys like `public_endpoint`, `public_base_url`, `from`, and custom `environment` outputs) instead of copying `.env.example` literals.
+
+## Workflow 0: Initialize targets and list platform provisioners
+
+When the user asks to initialize Score or list available provisioners — or before drafting `score.yaml` when `.score-compose/` or `.score-cloudrun/` is missing in a standalone repository — inspect `README.md`, `AGENTS.md`, `*.provisioners.yaml` (skipping `*.lookup.provisioners.yaml` unless production split-state lookup is requested), and `*.profiles.yaml`, then initialize in the repository root and keep both state folders on disk:
+
+```bash
+# Local Compose target (pass --no-default-provisioners when a curated *.provisioners.yaml file exists)
+score-compose init --no-sample [--no-default-provisioners] [--project <name>] [--provisioners score-compose.provisioners.yaml]
+score-compose provisioners list
+
+# Cloud Run target (when score-cloudrun.provisioners.yaml exists)
+score-cloudrun init --no-sample --provisioners score-cloudrun.provisioners.yaml [--profiles score-cloudrun.profiles.yaml]
+score-cloudrun provisioners list
+```
+
+If the user only asked to initialize Score or list available provisioners, present the catalog tables and stop before creating `score.yaml`.
 
 ## Workflow 1: Create `score.yaml` from an existing app
 
@@ -103,16 +119,14 @@ Read [references/portability-matrix.md](references/portability-matrix.md) for th
 
 ## Validate `score.yaml`
 
-Run target generators in a throwaway temp directory (or use existing initialized state with `-o - > /dev/null`) so validation leaves no untracked `.score-compose/`, `.score-cloudrun/`, or `manifests.tf` files behind. Pass `--build <container>=.` or `--image <img:tag>` when `image: .` is set:
+When `.score-compose/` or `.score-cloudrun/` is already initialized in the repository root, validate directly against that existing state with `-o - > /dev/null` and **keep `.score-compose/` and `.score-cloudrun/` intact** for subsequent commands (leaving no `compose.yaml` or `manifests.tf` files behind). Use a throwaway temp directory only when a managed wrapper (such as `local-dev`) owns state elsewhere. Pass `--build <container>=.` or `--image <img:tag>` when `image: .` is set:
 
 ```bash
-# Dry-run with score-compose (add --provisioners <file> if the repo provides custom provisioners)
-score-compose init --no-sample
+# Dry-run with score-compose (initialize with Workflow 0 first only if .score-compose/ is missing)
 score-compose generate score.yaml --build app=. -o - > /dev/null
 
-# Dry-run with score-cloudrun when targeting Google Cloud Run
-score-cloudrun init --no-sample --provisioners <provisioners.yaml> --profiles <profiles.yaml>
-score-cloudrun generate score.yaml --project-id demo-proj --location us-east1 --image example/app:dev -o - > /dev/null
+# Dry-run with score-cloudrun when targeting Google Cloud Run (initialize first only if .score-cloudrun/ is missing)
+score-cloudrun generate score.yaml --project-id demo-proj --location us-east4 --image example/app:dev -o - > /dev/null
 ```
 
 ## Reference files
