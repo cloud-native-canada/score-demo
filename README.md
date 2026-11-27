@@ -17,7 +17,9 @@ ls -la score.yaml compose.yaml infra/gcp/
 
 ## Act 1: Inspect Platform Catalog & Generate `score.yaml` (`score` skill)
 
-1. Initialize both Score target state folders **once** for the demo and list the approved platform catalog:
+1. **Voice / `agy` CLI prompt (or deterministic CLI below)** — initialize both Score target state folders **once** and list the approved platform catalog:
+
+   > *"Initialize Score and list the platform provisioners."*
 
 ```bash
 # Creates gitignored .score-compose/ and registers only the platform team's 5 local recipes (skips sample score.yaml and built-in defaults)
@@ -31,9 +33,11 @@ score-cloudrun provisioners list
 
 Notice both commands expose the exact same five resource types (`environment`, `postgres`, `redis`, `s3`, `smtp`).
 
-2. Prompt your coding agent naturally using your app context:
+2. **Voice / `agy` CLI prompt** — generate `score.yaml` from application context:
 
-   > *"Create a portable `score.yaml` for this app based on the `Dockerfile`, `.env.example`, `server/index.js`, and the available provisioners so I can run it locally with Docker Compose and deploy it to Cloud Run."*
+   > *"Create the Score file for this app."*
+
+   *(Or detailed prompt: "Create a portable `score.yaml` for this app based on the `Dockerfile`, `.env.example`, `server/index.js`, and the available provisioners so I can run it locally with Docker Compose and deploy it to Cloud Run.")*
 
 3. Continue into Acts 2 and 3 with zero edits to the generated file.
 
@@ -41,30 +45,24 @@ Notice both commands expose the exact same five resource types (`environment`, `
 
 `.score-compose/` is already initialized from Act 1, so do not repeat `score-compose init`.
 
-1. Copy `.env.example` to `.env` and generate a random 64-char hex `BETTER_AUTH_SECRET`:
+1. **Voice / `agy` CLI prompt** (creates `.env` with generated hex secrets from `.env.example`, compiles `compose.yaml`, boots containers, initializes MinIO, and bootstraps Postgres):
+
+   > *"Run this app locally on port 3000."*
+
+   Or run the deterministic CLI commands directly as fallback:
 
 ```bash
 cp .env.example .env
 SECRET=$(openssl rand -hex 32)
 node -e 'const fs=require("fs"); fs.writeFileSync(".env", fs.readFileSync(".env","utf8").replace("replace-with-32-char-random-secret", process.argv[1]))' "$SECRET"
-```
 
-   Or run `openssl rand -hex 32` and paste the value into `BETTER_AUTH_SECRET=` in `.env` manually.
-
-2. Prompt your coding agent:
-
-   > *"Run this app locally on port 3000 with Docker Compose using `score.yaml`."*
-
-   Or run the deterministic CLI commands directly as fallback:
-
-```bash
 score-compose generate score.yaml --build app=. --publish 3000:web:3000
 docker compose up -d --build --wait
 docker compose run --rm --no-deps minio-init
 docker compose run --rm web-app node server/bootstrap.js
 ```
 
-3. Open the demo app at `http://localhost:3000` and Mailpit at `http://localhost:8025`.
+2. Open the demo app at `http://localhost:3000` and Mailpit at `http://localhost:8025`.
 
 ## Act 3: Generate Cloud Run Terraform with `score-cloudrun`
 
@@ -97,11 +95,13 @@ See [`.agents/skills/score-cloudrun/SKILL.md`](.agents/skills/score-cloudrun/SKI
 
 A developer adds a new dependency in [`score.yaml`](score.yaml) with zero infrastructure YAML.
 
-### 1. Update `score.yaml` (Prompt, Manual Editor, or CLI)
+### 1. Update `score.yaml` & Test Locally (Voice / `agy` CLI, Manual Editor, or CLI)
 
-- **Natural developer prompt:**
+- **Voice / `agy` CLI prompt (updates `score.yaml`, regenerates Compose, boots Redis 7, and verifies `PONG`):**
 
-  > *"I need a Redis cache for this app—add it to `score.yaml` with `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD`."*
+  > *"Add a Redis cache to this app and test it locally."*
+
+  *(Or two-step voice prompts: "Add a Redis cache to this app" -> review `git diff score.yaml` -> "Now test Redis locally".)*
 
 - **Manual edit (`vim score.yaml` or editor):** Add `REDIS_*` variables under `containers.app.variables` and `cache` under `resources`:
 

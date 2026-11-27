@@ -1,6 +1,6 @@
 ---
 name: score-compose
-description: Compile score.yaml into Docker Compose with score-compose and inspect platform-provided resource provisioners. Use when generating or validating local Compose output, checking supported resource types and outputs, exposing ports, or applying Score overrides. Do not use to author score.yaml from scratch (use score) or to run ordinary app startup when a repo runner like local-dev exists.
+description: Compile score.yaml into Docker Compose with score-compose, inspect platform-provided resource provisioners, and run standalone Score workloads locally with Docker Compose. Use when starting or testing an app locally from score.yaml (including voice requests like "run this app locally on port 3000" or "test Redis locally"), generating or validating local Compose output, checking supported resource types and outputs, exposing ports, or applying Score overrides. Do not use to author score.yaml from scratch (use score) or to run ordinary app startup when a managed repo runner like local-dev exists.
 ---
 
 # Run Score locally with `score-compose`
@@ -22,10 +22,13 @@ Treat `score-compose` strictly as the **compiler**, and treat the repo runner as
 
 ### Mode B: Standalone Score repository (no wrapper)
 
+1. Reuse `.score-compose/` if it already exists. Run `score-compose init` only when `.score-compose/` is missing (adding `--no-default-provisioners`, any documented `--project <name>`, and `--provisioners score-compose.provisioners.yaml` when curated repo provisioners exist).
+2. If `score.yaml` uses `type: environment` and `.env` is missing (or still has `replace-with-*` placeholders) while `.env.example` exists, copy `.env.example` to `.env` and replace each `replace-with-*` secret placeholder with a fresh `openssl rand -hex 32` value without printing secrets.
+3. Generate `compose.yaml`, start containers, and run any one-shot init or bootstrap commands documented in `README.md` or `AGENTS.md`:
+
 ```bash
-score-compose init --no-sample [--no-default-provisioners] [--project <name>] [--provisioners <file-or-uri>]
 score-compose generate score.yaml [--build <container>=<dir> | --image <img:tag>] [--publish <host>:<workload>:<port>]
-docker compose up -d --wait
+docker compose up -d --build --wait
 ```
 
 ## Prerequisites
